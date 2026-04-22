@@ -308,7 +308,7 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut as fbSignOut }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as fbSignOut }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, orderBy }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
@@ -329,6 +329,9 @@ const firebaseConfig = {
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
+
+// Handle redirect sign-in result (fires after page reload from signInWithRedirect)
+getRedirectResult(auth).catch(()=>{});
 
 /* ── 台股股名對照表（常見台股，輸入代號自動帶入） ── */
 const TW_STOCKS = {
@@ -384,8 +387,17 @@ const histCol   = () => collection(db,'users',uid,'history');
 
 /* ════ AUTH ════ */
 window.signIn = async () => {
-  try{ await signInWithPopup(auth, new GoogleAuthProvider()); }
-  catch(e){ alert('登入失敗：'+e.message); }
+  try{
+    // Try popup first; fall back to redirect on mobile or restricted browsers
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch(e){
+    if(e.code==='auth/popup-blocked'||e.code==='auth/popup-closed-by-user'||e.code==='auth/cancelled-popup-request'||e.code==='auth/network-request-failed'){
+      try{ await signInWithRedirect(auth, new GoogleAuthProvider()); }
+      catch(e2){ alert('登入失敗：'+e2.message); }
+    } else {
+      alert('登入失敗：'+e.message);
+    }
+  }
 };
 window.signOut = async () => {
   await fbSignOut(auth);
@@ -771,11 +783,16 @@ function renderHist() {
       return`<div class="mono"><strong>${p}</strong> <span class="${pcls(pct)}" style="font-size:11px">${fmtP(pct)}</span></div>`;
     }).join('');
     const totalCol = `<div class="mono ${pcls(total)}" style="font-weight:700">${total>=0?'+':''}${fmt(total)}</div>`;
-    const safeNote = r.note ? r.note.replace(/\/g,'\\').replace(/`/g,"'").replace(/\$/g,'\$') : '';
-    const noteBtn = r.note
-      ? `<div><button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="showNote('${r.date}',\`${safeNote}\`)">查看</button></div>`
-      : `<div style="color:var(--text3);font-size:11px;text-align:center">—</div>`;
-    row.innerHTML = `<div class="mono" style="font-weight:500;font-size:12px">${r.date}</div>` + stockCols + totalCol + noteBtn;
+    // Store note via data attribute to avoid escaping issues in onclick
+    row.innerHTML = `<div class="mono" style="font-weight:500;font-size:12px">${r.date}</div>` + stockCols + totalCol +
+      (r.note
+        ? `<div><button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" data-note-date="${r.date}">查看</button></div>`
+        : `<div style="color:var(--text3);font-size:11px;text-align:center">—</div>`);
+    // Attach note content via event listener after innerHTML set (avoids all escaping)
+    if(r.note){
+      const btn = row.querySelector('[data-note-date]');
+      if(btn){ const noteContent=r.note; btn.addEventListener('click',()=>showNote(r.date, noteContent)); }
+    }
     list.appendChild(row);
   });
 }
