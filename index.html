@@ -101,6 +101,26 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
+/* AI button */
+.btn-ai{background:linear-gradient(135deg,#4d9fff 0%,#a78bfa 100%);color:#fff;border:none;font-weight:600;letter-spacing:.02em}
+.btn-ai:hover{opacity:.88}.btn-ai:disabled{opacity:.5;cursor:not-allowed}
+/* AI modal */
+#ai-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+#ai-modal.open{display:flex}
+.ai-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:700px;max-height:85vh;display:flex;flex-direction:column}
+.ai-panel-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.ai-panel-header h3{font-size:15px;font-weight:600;background:linear-gradient(135deg,#4d9fff,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.ai-panel-body{padding:20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.8;color:var(--text2)}
+.ai-panel-body p{margin-bottom:10px}
+.ai-panel-body strong{color:var(--text);font-weight:500}
+.ai-thinking{display:flex;align-items:center;gap:10px;color:var(--text3);font-size:13px}
+.dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation:dot .9s infinite both}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes dot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+/* chart range buttons */
+.range-btns{display:flex;gap:6px}
+.range-btn{background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;padding:4px 12px;cursor:pointer;font-family:var(--sans);transition:all .15s}
+.range-btn:hover{color:var(--text)}.range-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 @media(max-width:900px){.metrics{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:600px){.metrics{grid-template-columns:repeat(2,1fr)}.three-layers{grid-template-columns:1fr}}
 </style>
@@ -117,6 +137,19 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
   </button>
 </div>
 
+<!-- AI Analysis Modal -->
+<div id="ai-modal">
+  <div class="ai-panel">
+    <div class="ai-panel-header">
+      <h3>✦ AI 持倉分析 · 明日操作建議</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeAIModal()">✕ 關閉</button>
+    </div>
+    <div class="ai-panel-body" id="ai-output">
+      <div class="ai-thinking">分析中，請稍候<span class="dots"><span></span><span></span><span></span></span></div>
+    </div>
+  </div>
+</div>
+
 <div class="app" id="main-app" style="display:none">
 <header>
   <div class="logo">
@@ -125,7 +158,7 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
   </div>
   <div class="header-right">
     <div class="user-chip"><img id="user-photo" src="" alt=""><span id="user-name"></span></div>
-    <button class="btn btn-ghost" onclick="saveToday()">💾 儲存今日</button>
+    <button class="btn btn-ai" id="ai-btn" onclick="runAIAnalysis()">✦ AI 分析持倉</button>
     <button class="btn btn-ghost" onclick="signOut()">登出</button>
   </div>
 </header>
@@ -221,7 +254,21 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 <!-- 每日歷史 -->
 <div id="tab-hist" class="tab-content">
   <div class="card">
-    <div class="card-title">每日損益歷史<button class="btn btn-danger btn-sm" onclick="clearHist()">清除</button></div>
+    <div class="card-title">
+      資產走勢
+      <div class="range-btns">
+        <button class="range-btn active" onclick="setRange('7d',this)">7日</button>
+        <button class="range-btn" onclick="setRange('1m',this)">月</button>
+        <button class="range-btn" onclick="setRange('3m',this)">季</button>
+        <button class="range-btn" onclick="setRange('all',this)">全部</button>
+      </div>
+    </div>
+    <div style="position:relative;height:220px">
+      <canvas id="asset-chart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">每日損益明細<button class="btn btn-danger btn-sm" onclick="clearHist()">清除</button></div>
     <div id="hist-header" class="hist-row" style="font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border2)"></div>
     <div id="hist-list"></div>
   </div>
@@ -260,6 +307,7 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut as fbSignOut }
@@ -839,6 +887,7 @@ window.switchTab = function(name,el) {
   el.classList.add('active');
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='stop') buildStopEdit();
+  if(name==='hist') { renderHist(); setTimeout(buildChart, 50); }
 };
 
 /* ════ TOAST ════ */
@@ -865,6 +914,214 @@ function daysSinceISO(iso) {
     return Math.max(0,Math.floor((new Date()-new Date(y,m-1,d))/86400000));
   }
   return daysSince(iso);
+}
+
+/* ════ AI ANALYSIS ════ */
+window.runAIAnalysis = async function() {
+  const holdings = getActiveHoldings();
+  if(!holdings.length){ showToast('尚無持股資料','amber'); return; }
+
+  // gather current prices
+  const priceInfo = holdings.map(h => {
+    const cp = gp(h.code);
+    const meta = getMeta(h.code, h.avgCost);
+    const ms = moveStops[h.code] ?? null;
+    const effSL = ms ? Math.max(meta.atrStop, ms) : meta.atrStop;
+    const pct = cp ? (cp - h.avgCost) / h.avgCost * 100 : null;
+    return { code:h.code, name:h.name, lots:h.lots, avgCost:h.avgCost.toFixed(1),
+      currentPrice: cp || '未輸入', pct: pct ? pct.toFixed(2) : '—',
+      atrStop: meta.atrStop, moveStop: ms || '未設', effStop: effSL,
+      distToStop: cp ? ((cp-effSL)/cp*100).toFixed(1)+'%' : '—',
+      topic: meta.topic, redline: meta.redline };
+  });
+
+  const recentHist = histData.slice(0,5).map(r => {
+    let total = 0;
+    holdings.forEach(h => { const p = r.prices[h.code]; if(p) total += (p - h.avgCost) * 1000; });
+    return `${r.date} 總損益${total>=0?'+':''}${Math.round(total).toLocaleString()}元`;
+  }).join(' | ');
+
+  const prompt = `你是專業台股波段操作顧問，請用繁體中文分析以下持倉並給出明日操作建議。
+
+【持倉現況】
+${priceInfo.map(h => `
+▪ ${h.name}(${h.code}) ${h.lots}張
+  均成本 ${h.avgCost}元 | 今收 ${h.currentPrice}元 | 報酬 ${h.pct}%
+  ATR停損 ${h.atrStop} | 移動停損 ${h.moveStop} | 有效停損 ${h.effStop} | 距停損 ${h.distToStop}
+  核心題材：${h.topic}
+  題材紅線：${h.redline}`).join('\n')}
+
+【近期歷史損益】
+${recentHist || '尚無記錄'}
+
+【三層出場機制】
+第一層ATR硬停損：跌破次日開盤全出
+第二層移動停損：股價創高後手動上移鎖利
+第三層題材停利：題材失效主動出場
+
+請針對每檔股票給出：
+1. 目前狀態評估（強勢/整理/警戒）
+2. 明日具體操作建議（續抱/減碼/加碼/出場條件）
+3. 需特別關注的訊號
+4. 整體組合風險評估
+
+請用條列式輸出，簡潔有力，每檔不超過5行。`;
+
+  // show modal
+  document.getElementById('ai-modal').classList.add('open');
+  const out = document.getElementById('ai-output');
+  out.innerHTML = '<div class="ai-thinking">分析中，請稍候<span class="dots"><span></span><span></span><span></span></span></div>';
+
+  const btn = document.getElementById('ai-btn');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '分析失敗，請稍後再試';
+    // render markdown-ish text
+    out.innerHTML = text
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/▪/g, '<br>▪')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+  } catch(e) {
+    out.innerHTML = `<div style="color:var(--red)">分析失敗：${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+window.closeAIModal = () => document.getElementById('ai-modal').classList.remove('open');
+// close on backdrop click
+document.getElementById('ai-modal').addEventListener('click', e => {
+  if(e.target === document.getElementById('ai-modal')) closeAIModal();
+});
+
+/* ════ ASSET CHART ════ */
+let chartInst = null;
+let chartRange = '7d';
+
+window.setRange = function(range, el) {
+  chartRange = range;
+  document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  buildChart();
+};
+
+function buildChart() {
+  const canvas = document.getElementById('asset-chart');
+  if(!canvas) return;
+  if(!histData.length) { canvas.style.display='none'; return; }
+  canvas.style.display='block';
+
+  // sort oldest first
+  const sorted = histData.slice().sort((a,b)=>a.date.localeCompare(b.date));
+
+  // filter by range
+  const now = new Date();
+  let cutoff = null;
+  if(chartRange==='7d')  cutoff = new Date(now - 7*86400000);
+  if(chartRange==='1m')  cutoff = new Date(now - 30*86400000);
+  if(chartRange==='3m')  cutoff = new Date(now - 90*86400000);
+
+  const filtered = cutoff
+    ? sorted.filter(r => {
+        const [m,d] = r.date.split('/').map(Number);
+        const y = now.getFullYear();
+        return new Date(y, m-1, d) >= cutoff;
+      })
+    : sorted;
+
+  if(!filtered.length) { canvas.style.display='none'; return; }
+
+  const holdings = getActiveHoldings();
+  // compute total portfolio value for each day
+  const labels = filtered.map(r => r.date);
+  const values = filtered.map(r => {
+    let total = 0;
+    holdings.forEach(h => {
+      const p = r.prices[h.code];
+      if(p) total += p * h.lots * 1000;
+    });
+    return total > 0 ? total : null;
+  });
+
+  const costs = filtered.map(() => {
+    return holdings.reduce((a, h) => a + h.avgCost * h.lots * 1000, 0);
+  });
+
+  if(chartInst) chartInst.destroy();
+
+  const isDark = true; // always dark theme
+  chartInst = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '資產現值',
+          data: values,
+          borderColor: '#4d9fff',
+          backgroundColor: 'rgba(77,159,255,0.08)',
+          borderWidth: 2,
+          pointRadius: values.length <= 14 ? 4 : 2,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#4d9fff',
+          fill: true,
+          tension: 0.3,
+          spanGaps: true,
+        },
+        {
+          label: '投入成本',
+          data: costs,
+          borderColor: 'rgba(255,255,255,0.2)',
+          borderWidth: 1.5,
+          borderDash: [5,4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { labels:{ color:'#8892a4', font:{size:11}, boxWidth:12 } },
+        tooltip: {
+          backgroundColor:'#1e2535',
+          borderColor:'rgba(255,255,255,.14)',
+          borderWidth:1,
+          titleColor:'#e8eaf0',
+          bodyColor:'#8892a4',
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString()}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks:{ color:'#555f72', font:{size:11}, maxTicksLimit:8 },
+          grid:{ color:'rgba(255,255,255,.05)' }
+        },
+        y: {
+          ticks:{ color:'#555f72', font:{size:11},
+            callback: v => '$'+Math.round(v/1000)+'K' },
+          grid:{ color:'rgba(255,255,255,.05)' }
+        }
+      }
+    }
+  });
 }
 
 /* ════ INIT ════ */
