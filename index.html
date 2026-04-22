@@ -101,6 +101,13 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
+/* note modal */
+#note-modal{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}
+#note-modal.open{display:flex}
+.note-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:680px;overflow:hidden}
+.note-panel-hdr{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.note-panel-hdr h3{font-size:14px;font-weight:600;color:var(--text)}
+.note-panel-body{padding:20px;font-size:13px;line-height:1.85;color:var(--text2);white-space:pre-wrap;max-height:70vh;overflow-y:auto}
 /* chart range buttons */
 .range-btns{display:flex;gap:6px}
 .range-btn{background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;padding:4px 12px;cursor:pointer;font-family:var(--sans);transition:all .15s}
@@ -173,6 +180,10 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
     </div>
     <div id="alert-area"></div>
     <div class="note">有效停損 = ATR停損 與 移動停損 取較高者。上次儲存：<span id="last-save-info">尚未</span></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+      <div style="font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">明日操作建議（貼上 Claude 的分析，隨收盤一起儲存）</div>
+      <textarea id="daily-note" rows="6" placeholder="貼上今日操作建議內容…" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.7;padding:10px 12px;resize:vertical;outline:none;transition:border-color .2s"></textarea>
+    </div>
   </div>
 </div>
 
@@ -247,6 +258,17 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
     <div class="card-title">每日損益明細<button class="btn btn-danger btn-sm" onclick="clearHist()">清除</button></div>
     <div id="hist-header" class="hist-row" style="font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border2)"></div>
     <div id="hist-list"></div>
+  </div>
+</div>
+
+<!-- Note viewer modal -->
+<div id="note-modal">
+  <div class="note-panel">
+    <div class="note-panel-hdr">
+      <h3 id="note-modal-title">操作建議</h3>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('note-modal').classList.remove('open')">✕ 關閉</button>
+    </div>
+    <div class="note-panel-body" id="note-modal-body"></div>
   </div>
 </div>
 
@@ -406,6 +428,8 @@ async function loadAll() {
     const snap=await getDocs(q);
     histData=snap.docs.map(d=>({id:d.id,...d.data()}));
   } catch(e){ histData=[]; }
+  // 載入最近一筆 note 到 textarea（若未儲存過當日）
+  try{ const latest=histData[0]; if(latest&&latest.note){ const ta=document.getElementById('daily-note'); if(ta&&!ta.value) ta.value=latest.note; } }catch(e){}
   buildAll();
 }
 
@@ -561,7 +585,8 @@ window.saveToday = async function() {
   holdings.forEach(h=>{ const p=gp(h.code); if(!p)valid=false; prices[h.code]=p; });
   if(!valid){ showToast('請先輸入全部收盤價','red'); return; }
   const dateStr=todayStr();
-  const row={date:dateStr,prices};
+  const noteVal=document.getElementById('daily-note')?.value.trim()||'';
+  const row={date:dateStr,prices,...(noteVal&&{note:noteVal})};
   try{
     const existing=histData.find(h=>h.date===dateStr);
     if(existing){ await setDoc(doc(db,'users',uid,'history',existing.id),row); existing.prices=prices; }
@@ -570,6 +595,7 @@ window.saveToday = async function() {
     await setDoc(userDoc(),{lastPrices},{merge:true});
     renderHist();
     document.getElementById('last-save-info').textContent=dateStr+' ✓';
+    const dn=document.getElementById('daily-note'); if(dn) dn.value='';
     showToast('今日已儲存 ✓');
   } catch(e){ showToast('儲存失敗：'+e.message,'red'); }
 };
@@ -720,9 +746,9 @@ function renderHist() {
   const holdings=getActiveHoldings();
   const hdr=document.getElementById('hist-header');
   const list=document.getElementById('hist-list');
-  const cols=`68px repeat(${holdings.length},1fr) 88px`;
+  const cols=`68px repeat(${holdings.length},1fr) 88px 60px`;
   hdr.style.gridTemplateColumns=cols;
-  hdr.innerHTML=`<div>日期</div>`+holdings.map(h=>`<div>${h.name}</div>`).join('')+`<div>總損益</div>`;
+  hdr.innerHTML=`<div>日期</div>`+holdings.map(h=>`<div>${h.name}</div>`).join('')+`<div>總損益</div><div></div>`;
   list.innerHTML='';
   if(!histData.length){
     list.innerHTML='<div style="text-align:center;color:var(--text3);padding:24px;font-size:13px">尚無記錄，每日儲存後顯示於此</div>';
@@ -855,6 +881,17 @@ function buildRedlines() {
     tb.appendChild(tr);
   });
 }
+
+/* ════ NOTE MODAL ════ */
+window.showNote = function(date, text) {
+  document.getElementById('note-modal-title').textContent = date + ' 操作建議';
+  document.getElementById('note-modal-body').textContent = text;
+  document.getElementById('note-modal').classList.add('open');
+};
+document.addEventListener('click', e => {
+  const m = document.getElementById('note-modal');
+  if(e.target === m) m.classList.remove('open');
+});
 
 /* ════ TABS ════ */
 window.switchTab = function(name,el) {
