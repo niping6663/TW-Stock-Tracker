@@ -101,22 +101,6 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
-/* AI button */
-.btn-ai{background:linear-gradient(135deg,#4d9fff 0%,#a78bfa 100%);color:#fff;border:none;font-weight:600;letter-spacing:.02em}
-.btn-ai:hover{opacity:.88}.btn-ai:disabled{opacity:.5;cursor:not-allowed}
-/* AI modal */
-#ai-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
-#ai-modal.open{display:flex}
-.ai-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:700px;max-height:85vh;display:flex;flex-direction:column}
-.ai-panel-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.ai-panel-header h3{font-size:15px;font-weight:600;background:linear-gradient(135deg,#4d9fff,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.ai-panel-body{padding:20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.8;color:var(--text2)}
-.ai-panel-body p{margin-bottom:10px}
-.ai-panel-body strong{color:var(--text);font-weight:500}
-.ai-thinking{display:flex;align-items:center;gap:10px;color:var(--text3);font-size:13px}
-.dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);animation:dot .9s infinite both}
-.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
-@keyframes dot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
 /* chart range buttons */
 .range-btns{display:flex;gap:6px}
 .range-btn{background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text3);font-size:12px;padding:4px 12px;cursor:pointer;font-family:var(--sans);transition:all .15s}
@@ -137,13 +121,6 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
   </button>
 </div>
 
-<!-- AI Analysis Modal -->
-<div id="ai-modal">
-  <div class="ai-panel">
-    <div class="ai-panel-header">
-      <h3>✦ AI 持倉分析 · 明日操作建議</h3>
-      <button class="btn btn-ghost btn-sm" onclick="closeAIModal()">✕ 關閉</button>
-    </div>
     <div class="ai-panel-body" id="ai-output">
       <div class="ai-thinking">分析中，請稍候<span class="dots"><span></span><span></span><span></span></span></div>
     </div>
@@ -158,7 +135,6 @@ tfoot td{border-top:1px solid var(--border2);font-weight:500}
   </div>
   <div class="header-right">
     <div class="user-chip"><img id="user-photo" src="" alt=""><span id="user-name"></span></div>
-    <button class="btn btn-ai" id="ai-btn" onclick="runAIAnalysis()">✦ AI 分析持倉</button>
     <button class="btn btn-ghost" onclick="signOut()">登出</button>
   </div>
 </header>
@@ -916,95 +892,6 @@ function daysSinceISO(iso) {
   return daysSince(iso);
 }
 
-/* ════ AI ANALYSIS ════ */
-window.runAIAnalysis = async function() {
-  const holdings = getActiveHoldings();
-  if(!holdings.length){ showToast('尚無持股資料','amber'); return; }
-
-  // gather current prices
-  const priceInfo = holdings.map(h => {
-    const cp = gp(h.code);
-    const meta = getMeta(h.code, h.avgCost);
-    const ms = moveStops[h.code] ?? null;
-    const effSL = ms ? Math.max(meta.atrStop, ms) : meta.atrStop;
-    const pct = cp ? (cp - h.avgCost) / h.avgCost * 100 : null;
-    return { code:h.code, name:h.name, lots:h.lots, avgCost:h.avgCost.toFixed(1),
-      currentPrice: cp || '未輸入', pct: pct ? pct.toFixed(2) : '—',
-      atrStop: meta.atrStop, moveStop: ms || '未設', effStop: effSL,
-      distToStop: cp ? ((cp-effSL)/cp*100).toFixed(1)+'%' : '—',
-      topic: meta.topic, redline: meta.redline };
-  });
-
-  const recentHist = histData.slice(0,5).map(r => {
-    let total = 0;
-    holdings.forEach(h => { const p = r.prices[h.code]; if(p) total += (p - h.avgCost) * 1000; });
-    return `${r.date} 總損益${total>=0?'+':''}${Math.round(total).toLocaleString()}元`;
-  }).join(' | ');
-
-  const prompt = `你是專業台股波段操作顧問，請用繁體中文分析以下持倉並給出明日操作建議。
-
-【持倉現況】
-${priceInfo.map(h => `
-▪ ${h.name}(${h.code}) ${h.lots}張
-  均成本 ${h.avgCost}元 | 今收 ${h.currentPrice}元 | 報酬 ${h.pct}%
-  ATR停損 ${h.atrStop} | 移動停損 ${h.moveStop} | 有效停損 ${h.effStop} | 距停損 ${h.distToStop}
-  核心題材：${h.topic}
-  題材紅線：${h.redline}`).join('\n')}
-
-【近期歷史損益】
-${recentHist || '尚無記錄'}
-
-【三層出場機制】
-第一層ATR硬停損：跌破次日開盤全出
-第二層移動停損：股價創高後手動上移鎖利
-第三層題材停利：題材失效主動出場
-
-請針對每檔股票給出：
-1. 目前狀態評估（強勢/整理/警戒）
-2. 明日具體操作建議（續抱/減碼/加碼/出場條件）
-3. 需特別關注的訊號
-4. 整體組合風險評估
-
-請用條列式輸出，簡潔有力，每檔不超過5行。`;
-
-  // show modal
-  document.getElementById('ai-modal').classList.add('open');
-  const out = document.getElementById('ai-output');
-  out.innerHTML = '<div class="ai-thinking">分析中，請稍候<span class="dots"><span></span><span></span><span></span></span></div>';
-
-  const btn = document.getElementById('ai-btn');
-  btn.disabled = true;
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    const data = await res.json();
-    const text = data.content?.[0]?.text || '分析失敗，請稍後再試';
-    // render markdown-ish text
-    out.innerHTML = text
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/▪/g, '<br>▪')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/\n/g, '<br>');
-  } catch(e) {
-    out.innerHTML = `<div style="color:var(--red)">分析失敗：${e.message}</div>`;
-  } finally {
-    btn.disabled = false;
-  }
-};
-
-window.closeAIModal = () => document.getElementById('ai-modal').classList.remove('open');
-// close on backdrop click
-document.getElementById('ai-modal').addEventListener('click', e => {
-  if(e.target === document.getElementById('ai-modal')) closeAIModal();
-});
 
 /* ════ ASSET CHART ════ */
 let chartInst = null;
