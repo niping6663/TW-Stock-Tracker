@@ -429,7 +429,13 @@ async function loadAll() {
     histData=snap.docs.map(d=>({id:d.id,...d.data()}));
   } catch(e){ histData=[]; }
   // 載入最近一筆 note 到 textarea（若未儲存過當日）
-  try{ const latest=histData[0]; if(latest&&latest.note){ const ta=document.getElementById('daily-note'); if(ta&&!ta.value) ta.value=latest.note; } }catch(e){}
+  // 載入當日或最近一筆 note 到 textarea
+  try{
+    const todayKey = todayStr();
+    const todayRec = histData.find(h=>h.date===todayKey);
+    const latest = todayRec || histData[0];
+    if(latest&&latest.note){ const ta=document.getElementById('daily-note'); if(ta) ta.value=latest.note; }
+  }catch(e){}
   buildAll();
 }
 
@@ -589,13 +595,12 @@ window.saveToday = async function() {
   const row={date:dateStr,prices,...(noteVal&&{note:noteVal})};
   try{
     const existing=histData.find(h=>h.date===dateStr);
-    if(existing){ await setDoc(doc(db,'users',uid,'history',existing.id),row); existing.prices=prices; }
+    if(existing){ await setDoc(doc(db,'users',uid,'history',existing.id),row); existing.prices=prices; if(noteVal) existing.note=noteVal; }
     else { const ref=await addDoc(histCol(),row); histData.unshift({id:ref.id,...row}); }
     lastPrices=prices;
     await setDoc(userDoc(),{lastPrices},{merge:true});
     renderHist();
     document.getElementById('last-save-info').textContent=dateStr+' ✓';
-    const dn=document.getElementById('daily-note'); if(dn) dn.value='';
     showToast('今日已儲存 ✓');
   } catch(e){ showToast('儲存失敗：'+e.message,'red'); }
 };
@@ -757,16 +762,20 @@ function renderHist() {
   histData.forEach(r=>{
     let total=0;
     const row=document.createElement('div'); row.className='hist-row'; row.style.gridTemplateColumns=cols;
-    row.innerHTML=`<div class="mono" style="font-weight:500;font-size:12px">${r.date}</div>`+
-      holdings.map(h=>{
-        const hi=getActiveHoldings().find(x=>x.code===h.code);
-        const refCost=hi?hi.avgCost:0;
-        const p=r.prices[h.code];
-        if(!p)return`<div style="color:var(--text3)">—</div>`;
-        const pct=(p-refCost)/refCost*100; total+=(p-refCost)*1000;
-        return`<div class="mono"><strong>${p}</strong> <span class="${pcls(pct)}" style="font-size:11px">${fmtP(pct)}</span></div>`;
-      }).join('')+
-      `<div class="mono ${pcls(total)}" style="font-weight:700">${total>=0?'+':''}${fmt(total)}</div>`;
+    const stockCols = holdings.map(h=>{
+      const hi=getActiveHoldings().find(x=>x.code===h.code);
+      const refCost=hi?hi.avgCost:0;
+      const p=r.prices[h.code];
+      if(!p)return`<div style="color:var(--text3)">—</div>`;
+      const pct=(p-refCost)/refCost*100; total+=(p-refCost)*1000;
+      return`<div class="mono"><strong>${p}</strong> <span class="${pcls(pct)}" style="font-size:11px">${fmtP(pct)}</span></div>`;
+    }).join('');
+    const totalCol = `<div class="mono ${pcls(total)}" style="font-weight:700">${total>=0?'+':''}${fmt(total)}</div>`;
+    const safeNote = r.note ? r.note.replace(/\/g,'\\').replace(/`/g,"'").replace(/\$/g,'\$') : '';
+    const noteBtn = r.note
+      ? `<div><button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="showNote('${r.date}',\`${safeNote}\`)">查看</button></div>`
+      : `<div style="color:var(--text3);font-size:11px;text-align:center">—</div>`;
+    row.innerHTML = `<div class="mono" style="font-weight:500;font-size:12px">${r.date}</div>` + stockCols + totalCol + noteBtn;
     list.appendChild(row);
   });
 }
